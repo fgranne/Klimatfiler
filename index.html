@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fuktår</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: kontrollpanel till vänster (plats, analys, export), resultat till höger; staplas på smal skärm */
+:root{
+  --bg:#EEF2F4; --surface:#FFFFFF; --ink:#15212B; --muted:#586874; --line:#D3DCE2;
+  --accent:#1D5F8C; --accent-soft:#DCE9F2; --crit:#B4731A; --crit-soft:#F6E8D2;
+  --ok:#2F7A4C; --bad:#B23A30;
+  --f-display:"Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-body:"Schibsted Grotesk",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E151B; --surface:#16212A; --ink:#E2E9EE; --muted:#93A3B0;
+  --line:#2A3945; --accent:#6EB0DF; --accent-soft:#1B3447; --crit:#E2A64C; --crit-soft:#3A2C17;
+  --ok:#6CC08D; --bad:#E7786D; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E151B; --surface:#16212A; --ink:#E2E9EE; --muted:#93A3B0;
+  --line:#2A3945; --accent:#6EB0DF; --accent-soft:#1B3447; --crit:#E2A64C; --crit-soft:#3A2C17;
+  --ok:#6CC08D; --bad:#E7786D; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);padding:0 16px 48px}
+header{max-width:1280px;margin:0 auto;padding-block:28px 20px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px}
+h1{font:700 2rem/1.1 var(--f-display);letter-spacing:-.02em;margin:0}
+header p{margin:0;color:var(--muted);max-width:60ch}
+.layout{max-width:1280px;margin:0 auto;display:grid;grid-template-columns:minmax(300px,390px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.col{display:flex;flex-direction:column;gap:20px;min-width:0}
+h2{font:600 .78rem/1.2 var(--f-display);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0}
+h3{font:600 1.15rem/1.3 var(--f-display);margin:0;text-wrap:balance}
+label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
+input,select,button{font:inherit;color:var(--ink)}
+input[type=text],input[type=number],select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%;min-width:0}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.check{flex-direction:row;align-items:center;gap:8px;color:var(--ink)}
+#map{height:240px;border-radius:8px;border:1px solid var(--line);z-index:0}
+.btn{background:var(--accent);color:var(--surface);border:0;border-radius:7px;padding:11px 16px;font-weight:600;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+.hint{font-size:.8rem;color:var(--muted);margin:0}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.85rem}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-weight:600;color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em}
+td select{padding:4px 6px;font-size:.82rem}
+#log{list-style:none;margin:0;padding:0;font:12px/1.6 var(--f-mono);color:var(--muted);max-height:180px;overflow:auto}
+#log li.ok::before{content:"✓ ";color:var(--ok)}
+#log li.run::before{content:"… ";color:var(--accent)}
+#log li.err{color:var(--bad)}
+#log li.err::before{content:"✗ "}
+.empty{border:1px dashed var(--line);border-radius:10px;padding:28px;color:var(--muted);text-align:left}
+.empty strong{color:var(--ink)}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{fill:var(--muted);font:11px var(--f-mono)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.8rem;color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.tile .k{font-size:.75rem;color:var(--muted)}
+.tile .v{font:600 1.35rem/1.2 var(--f-mono);font-variant-numeric:tabular-nums}
+.tile .d{font-size:.75rem;color:var(--muted)}
+.pill{display:inline-block;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--crit-soft);color:var(--crit)}
+.pill.sel{background:var(--accent-soft);color:var(--accent)}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;font:11.5px/1.5 var(--f-mono);margin:0}
+details summary{cursor:pointer;font-weight:600}
+details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
+.headrow{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between}
+.bar{cursor:pointer}
+@media (prefers-reduced-motion:no-preference){.bar{transition:opacity .15s}}
+.bar:hover{opacity:.75}
+.leaflet-container{font:inherit;background:var(--bg)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Fuktår</h1>
+  <p>Kritiska klimatår för WUFI och andra fuktberäkningar, byggda på SMHI:s öppna mätdata och STRÅNG-strålning.</p>
+</header>
+
+<div class="layout">
+  <div class="col">
+    <section class="panel" aria-labelledby="h-plats">
+      <h2 id="h-plats">1 · Plats</h2>
+      <div id="map" role="application" aria-label="Karta, klicka för att välja plats"></div>
+      <label for="search">Sök station eller ort
+        <input type="text" id="search" list="stationnames" placeholder="t.ex. Göteborg, Luleå, Visby" autocomplete="off">
+        <datalist id="stationnames"></datalist>
+      </label>
+      <div class="row">
+        <label for="lat">Latitud<input type="number" id="lat" step="0.0001" value="57.7089"></label>
+        <label for="lon">Longitud<input type="number" id="lon" step="0.0001" value="11.9746"></label>
+      </div>
+      <p class="hint">Klicka i kartan, sök på ett stationsnamn eller ange koordinater.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-analys">
+      <h2 id="h-analys">2 · Analys</h2>
+      <div class="row">
+        <label for="y0">Från år<input type="number" id="y0" min="1999" step="1"></label>
+        <label for="y1">Till år<input type="number" id="y1" min="1999" step="1"></label>
+      </div>
+      <label for="crit">Kriterium för kritiskt år
+        <select id="crit">
+          <option value="mi">Fuktindex (slagregn + uttorkning)</option>
+          <option value="dr">Slagregn mot fasad</option>
+          <option value="cold">Kallt år (låg årsmedeltemperatur)</option>
+        </select>
+      </label>
+      <div class="row">
+        <label for="orient">Fasadorientering
+          <select id="orient">
+            <option value="auto">Mest utsatt (auto)</option>
+            <option value="0">N</option><option value="45">NO</option><option value="90">O</option><option value="135">SO</option>
+            <option value="180">S</option><option value="225">SV</option><option value="270">V</option><option value="315">NV</option>
+          </select>
+        </label>
+        <label for="level">Nivå
+          <select id="level">
+            <option value="0.1">10 % (1 år av 10)</option>
+            <option value="0.05">5 % (1 år av 20)</option>
+            <option value="0">Värsta året</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint">EN 15026 anger ett fuktreferensår som överskrids med 10 % sannolikhet. Bara år med minst 85 % datatäckning rangordnas.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-export">
+      <h2 id="h-export">3 · CSV-format</h2>
+      <label for="sep">Avgränsare
+        <select id="sep">
+          <option value="sv">Semikolon, decimalkomma (svensk Excel)</option>
+          <option value="en">Komma, decimalpunkt</option>
+        </select>
+      </label>
+      <label class="check" for="noleap"><input type="checkbox" id="noleap" checked> Ta bort 29 februari (alltid 8760 timmar)</label>
+      <label class="check" for="meta"><input type="checkbox" id="meta" checked> Metadatarader överst (#)</label>
+      <button class="btn" id="run" type="button">Beräkna fuktreferensår</button>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" aria-labelledby="h-st">
+      <div class="headrow"><h2 id="h-st">Stationer</h2><span class="hint" id="st-note">Laddar stationslistor från SMHI …</span></div>
+      <div class="tablewrap"><table id="sttable"><thead><tr><th>Parameter</th><th>Station</th><th>Avstånd</th><th>Täckning</th></tr></thead><tbody></tbody></table></div>
+      <p class="hint">Närmaste station med god täckning under perioden väljs automatiskt. Saknas timmar fylls de i första hand från nästa station i listan. Strålning hämtas från STRÅNG för exakt vald punkt.</p>
+    </section>
+
+    <section class="panel" id="results" aria-labelledby="h-res">
+      <div class="headrow"><h2 id="h-res">Resultat</h2><span id="res-pill"></span></div>
+      <div id="res-body">
+        <div class="empty"><strong>Inget beräknat än.</strong><br>Välj plats och period och tryck på <em>Beräkna fuktreferensår</em>. Appen hämtar timdata för hela perioden (oftast 20–60 MB), rangordnar åren och bygger en timfil för det kritiska året.</div>
+      </div>
+      <ul id="log" aria-live="polite"></ul>
+    </section>
+
+    <section class="panel" aria-labelledby="h-met">
+      <h2 id="h-met">Metod</h2>
+      <details>
+        <summary>Hur det kritiska året väljs och filen byggs</summary>
+        <ul>
+          <li><b>Slagregn</b> beräknas timme för timme enligt SS-EN ISO 15927-3: I = 2/9 · v · r<sup>8/9</sup> · cos(D − θ), där v är vindhastighet, r nederbörd (mm/h), D vindriktning och θ fasadens normalriktning. Bara timmar med vind mot fasaden räknas.</li>
+          <li><b>Uttorkningspotential</b> är årssumman av (1 − RF) · p<sub>sat</sub>(T), alltså mättnadsunderskottet.</li>
+          <li><b>Fuktindex</b> (Cornick m.fl., NRC): båda storheterna normeras mot periodens högsta värde, och MI = √((1 − UI)² + SI²). Högt MI betyder mycket slagregn och liten uttorkning.</li>
+          <li><b>Nivå</b>: vid 10 % och N år väljs det år som har rang ≈ 0,1·N räknat från det mest ogynnsamma. Klicka på en annan stapel för att exportera ett annat år.</li>
+          <li><b>Strålning</b>: global, diffus och direkt normalstrålning från SMHI:s STRÅNG-modell (finns från 1999). Diffusstrålning finns i STRÅNG först från 2017. För tidigare år beräknas den som global − DNI · sin(solhöjd).</li>
+          <li><b>Motstrålning</b> beräknas med Brutsaert för klar himmel och molnkorrektion enligt Crawford &amp; Duchon: ε = N + (1 − N)·1,24·(e/T)<sup>1/7</sup>, L = ε·σ·T⁴.</li>
+          <li><b>Lufttryck</b> räknas om från havsytans nivå till temperaturstationens höjd.</li>
+          <li><b>Luckor</b>: luckor längre än 6 h fylls från närmaste reservstation. Resten interpoleras linjärt (vindriktning som vektor), och saknad nederbörd sätts till 0. Kolumnen <i>Ifyllt</i> visar vilka parametrar som har fyllts i varje timme.</li>
+          <li><b>Tid</b>: svensk normaltid (UTC+1, utan sommartid). Momentanvärden avser tidpunkten. Nederbörd är summan för timmen fram till tidpunkten.</li>
+          <li>Data: SMHI, CC BY 4.0. Endast kvalitetskontrollerade arkivdata används, så de tre senaste månaderna ingår inte.</li>
+        </ul>
+      </details>
+    </section>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+const API = "https://opendata-download-metobs.smhi.se/api/version/1.0";
+const STRANG = "https://opendata-download-metanalys.smhi.se/api/category/strang1g/version/1/geotype/point";
+const H = 3600000, YR = 365.25 * 24 * H;
+const $ = id => document.getElementById(id);
+
+// Parametergrupper. Vind hämtar både hastighet (4) och riktning (3) från samma station.
+const GROUPS = {
+  T:     { label: "Temperatur",       params: [1] },
+  RH:    { label: "Relativ fuktighet",params: [6] },
+  RAIN:  { label: "Nederbörd (tim)",  params: [7] },
+  WIND:  { label: "Vind",             params: [4, 3] },
+  CLOUD: { label: "Molnmängd",        params: [16] },
+  PRES:  { label: "Lufttryck",        params: [9] },
+};
+const ORIENT = [["N",0],["NO",45],["O",90],["SO",135],["S",180],["SV",225],["V",270],["NV",315]];
+
+const state = {
+  lat: 57.7089, lon: 11.9746, stations: {}, cand: {}, sel: {},
+  csvCache: new Map(), result: null, selYear: null, csv: null, fileName: null,
+};
+
+/* ---------- hjälpfunktioner ---------- */
+const now = new Date();
+const lastYear = now.getUTCMonth() >= 3 ? now.getUTCFullYear() - 1 : now.getUTCFullYear() - 2;
+$("y0").value = 1999; $("y1").value = lastYear; $("y0").max = $("y1").max = lastYear;
+
+function dist(a, b, c, d) {
+  const r = Math.PI / 180, dLat = (c - a) * r, dLon = (d - b) * r;
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(x));
+}
+const isLeap = y => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+const hoursIn = y => (isLeap(y) ? 366 : 365) * 24;
+const psat = T => 611.2 * Math.exp(17.62 * T / (243.12 + T));
+
+function log(msg, cls = "run") {
+  const li = document.createElement("li"); li.className = cls; li.textContent = msg;
+  $("log").appendChild(li); $("log").scrollTop = 1e9; return li;
+}
+function done(li, msg, cls = "ok") { li.className = cls; if (msg) li.textContent = msg; }
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status + " " + url);
+  return r.json();
+}
+async function fetchText(url) {
+  const r = await fetch(url);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(r.status + " " + url);
+  return r.text();
+}
+
+/* ---------- stationslistor ---------- */
+async function loadStations() {
+  const ids = [1, 6, 7, 4, 3, 16, 9];
+  const lists = await Promise.all(ids.map(p => fetchJSON(`${API}/parameter/${p}.json`)));
+  const byParam = {};
+  ids.forEach((p, i) => byParam[p] = lists[i].station.map(s => ({
+    id: s.id ?? +s.key, name: s.name, lat: s.latitude, lon: s.longitude, h: s.height, from: s.from, to: s.to, active: s.active,
+  })));
+  for (const [g, def] of Object.entries(GROUPS)) {
+    if (def.params.length === 1) { state.stations[g] = byParam[def.params[0]]; continue; }
+    const other = new Map(byParam[def.params[1]].map(s => [s.id, s]));
+    state.stations[g] = byParam[def.params[0]].filter(s => other.has(s.id)).map(s => {
+      const o = other.get(s.id); return { ...s, from: Math.max(s.from, o.from), to: Math.min(s.to, o.to) };
+    });
+  }
+  // sökbara namn: temperaturstationer (bredast nät)
+  const seen = new Set(), dl = $("stationnames");
+  byParam[1].concat(byParam[7]).sort((a, b) => a.name.localeCompare(b.name, "sv")).forEach(s => {
+    if (seen.has(s.name)) return; seen.add(s.name);
+    const o = document.createElement("option"); o.value = s.name; dl.appendChild(o);
+  });
+  state.nameIndex = new Map(byParam[1].concat(byParam[7]).map(s => [s.name.toLowerCase(), s]));
+}
+
+function period() {
+  let y0 = Math.max(1999, Math.round(+$("y0").value || 1999));
+  let y1 = Math.min(lastYear, Math.round(+$("y1").value || lastYear));
+  if (y1 < y0) [y0, y1] = [y1, y0];
+  return { y0, y1 };
+}
+
+function computeCandidates() {
+  const { y0, y1 } = period();
+  const s = Date.UTC(y0, 0, 1), e = Date.UTC(y1 + 1, 0, 1), span = (e - s) / YR;
+  for (const g of Object.keys(GROUPS)) {
+    const list = (state.stations[g] || []).map(st => {
+      const ov = Math.max(0, (Math.min(st.to, e) - Math.max(st.from, s)) / YR);
+      const d = dist(state.lat, state.lon, st.lat, st.lon);
+      return { ...st, ov, d, score: d + 100 * (1 - Math.min(1, ov / span)) };
+    }).filter(c => c.ov >= Math.min(3, span * 0.5)).sort((a, b) => a.score - b.score).slice(0, 8);
+    state.cand[g] = list;
+    state.sel[g] = list[0]?.id ?? null;
+  }
+  renderStations();
+}
+
+function renderStations() {
+  const { y0, y1 } = period(), span = y1 - y0 + 1;
+  const tb = $("sttable").tBodies[0]; tb.innerHTML = "";
+  for (const [g, def] of Object.entries(GROUPS)) {
+    const tr = tb.insertRow();
+    tr.insertCell().textContent = def.label;
+    const td = tr.insertCell(); const list = state.cand[g] || [];
+    if (!list.length) { td.textContent = "Ingen station med data"; td.style.color = "var(--bad)"; tr.insertCell(); tr.insertCell(); continue; }
+    const sel = document.createElement("select"); sel.id = "sel-" + g; sel.setAttribute("aria-label", def.label + ", station");
+    list.forEach(c => { const o = document.createElement("option"); o.value = c.id; o.textContent = `${c.name} (${c.id})`; sel.appendChild(o); });
+    sel.value = state.sel[g];
+    const dCell = tr.insertCell(), ovCell = tr.insertCell();
+    dCell.className = ovCell.className = "mono";
+    const upd = () => {
+      const c = list.find(x => x.id === +sel.value); state.sel[g] = c.id;
+      dCell.textContent = c.d.toFixed(0) + " km";
+      ovCell.textContent = Math.min(span, c.ov).toFixed(0) + "/" + span + " år";
+      drawStationMarkers();
+    };
+    sel.addEventListener("change", upd); td.appendChild(sel); upd();
+  }
+  $("st-note").textContent = `${state.lat.toFixed(3)}° N, ${state.lon.toFixed(3)}° E`;
+}
+
+/* ---------- karta ---------- */
+let map = null, here = null, stLayer = null;
+function initMap() {
+  if (!window.L) { $("map").hidden = true; return; }
+  map = L.map("map", { zoomControl: true }).setView([state.lat, state.lon], 6);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 13, attribution: "© OpenStreetMap" }).addTo(map);
+  here = L.circleMarker([state.lat, state.lon], { radius: 8, color: "#B4731A", weight: 3, fillOpacity: .3 }).addTo(map);
+  stLayer = L.layerGroup().addTo(map);
+  map.on("click", e => setLocation(e.latlng.lat, e.latlng.lng, false));
+}
+function drawStationMarkers() {
+  if (!stLayer) return; stLayer.clearLayers(); const seen = new Set();
+  for (const g of Object.keys(GROUPS)) {
+    const c = (state.cand[g] || []).find(x => x.id === state.sel[g]); if (!c || seen.has(c.id)) continue; seen.add(c.id);
+    L.circleMarker([c.lat, c.lon], { radius: 5, color: "#1D5F8C", weight: 2, fillOpacity: .8 }).bindTooltip(c.name).addTo(stLayer);
+  }
+}
+function setLocation(lat, lon, pan = true) {
+  state.lat = +lat; state.lon = +lon;
+  $("lat").value = state.lat.toFixed(4); $("lon").value = state.lon.toFixed(4);
+  if (here) here.setLatLng([state.lat, state.lon]);
+  if (map && pan) map.setView([state.lat, state.lon], Math.max(map.getZoom(), 8));
+  computeCandidates();
+}
+$("lat").addEventListener("change", () => setLocation($("lat").value, $("lon").value));
+$("lon").addEventListener("change", () => setLocation($("lat").value, $("lon").value));
+$("search").addEventListener("change", () => {
+  const s = state.nameIndex?.get($("search").value.trim().toLowerCase());
+  if (s) setLocation(s.lat, s.lon);
+});
+$("y0").addEventListener("change", computeCandidates);
+$("y1").addEventListener("change", computeCandidates);
+
+/* ---------- data ---------- */
+// Lägger SMHI-arkiv-CSV i en Float32Array med en plats per timme från base.
+function parseArchive(text, base, n) {
+  const out = new Float32Array(n).fill(NaN);
+  if (!text) return out;
+  let i = text.indexOf("\nDatum;Tid (UTC)");
+  if (i < 0) return out;
+  i = text.indexOf("\n", i + 1) + 1;
+  const end = base + n * H;
+  while (i > 0 && i < text.length) {
+    const j = text.indexOf("\n", i); const line = text.slice(i, j < 0 ? undefined : j); i = j < 0 ? -1 : j + 1;
+    if (line.length < 20 || line[14] !== "0" || line[15] !== "0") continue;
+    const t = Date.UTC(+line.slice(0, 4), +line.slice(5, 7) - 1, +line.slice(8, 10), +line.slice(11, 13));
+    if (t < base || t >= end) continue;
+    const k = line.indexOf(";", 20); const v = parseFloat(line.slice(20, k < 0 ? undefined : k));
+    if (Number.isFinite(v)) out[(t - base) / H] = v;
+  }
+  return out;
+}
+
+async function getArchive(param, id) {
+  const key = param + ":" + id;
+  if (!state.csvCache.has(key)) {
+    state.csvCache.set(key, fetchText(`${API}/parameter/${param}/station/${id}/period/corrected-archive/data.csv`)
+      .catch(e => { state.csvCache.delete(key); throw e; }));
+  }
+  return state.csvCache.get(key);
+}
+
+async function loadSeries(param, id, base, n, label) {
+  const li = log(`Hämtar ${label} – station ${id}`);
+  try {
+    const txt = await getArchive(param, id);
+    const arr = parseArchive(txt, base, n);
+    done(li, `${label} – station ${id}${txt ? "" : " (inget arkiv)"}`, txt ? "ok" : "err");
+    return arr;
+  } catch (e) { done(li, `${label}: ${e.message}`, "err"); return new Float32Array(n).fill(NaN); }
+}
+
+async function pool(tasks, k = 4) {
+  const res = new Array(tasks.length); let next = 0;
+  await Promise.all(Array.from({ length: k }, async () => { while (next < tasks.length) { const i = next++; res[i] = await tasks[i](); } }));
+  return res;
+}
+
+/* ---------- analys ---------- */
+async function run() {
+  const btn = $("run"); btn.disabled = true; $("log").innerHTML = "";
+  try {
+    const { y0, y1 } = period();
+    if (["T", "RH", "RAIN", "WIND"].some(g => state.sel[g] == null))
+      throw new Error("Det finns ingen station för någon av huvudparametrarna. Välj en annan plats eller period.");
+    const base = Date.UTC(y0, 0, 1) - H, n = (Date.UTC(y1 + 1, 0, 1) - H - base) / H;
+    const [T, RH, R, WS, WD] = await pool([
+      () => loadSeries(1, state.sel.T, base, n, "Temperatur"),
+      () => loadSeries(6, state.sel.RH, base, n, "Relativ fuktighet"),
+      () => loadSeries(7, state.sel.RAIN, base, n, "Nederbörd"),
+      () => loadSeries(4, state.sel.WIND, base, n, "Vindhastighet"),
+      () => loadSeries(3, state.sel.WIND, base, n, "Vindriktning"),
+    ]);
+    const li = log("Rangordnar år");
+    const years = [];
+    for (let y = y0; y <= y1; y++) {
+      const i0 = (Date.UTC(y, 0, 1) - H - base) / H, len = hoursIn(y);
+      let nT = 0, sT = 0, nDI = 0, sDI = 0, nR = 0, sR = 0, nDR = 0, sRH = 0, nRH = 0;
+      const dr = new Float64Array(8);
+      for (let i = i0; i < i0 + len; i++) {
+        const t = T[i], h = RH[i], r = R[i], v = WS[i], d = WD[i];
+        if (t === t) { nT++; sT += t; }
+        if (h === h) { nRH++; sRH += h; }
+        if (t === t && h === h) { nDI++; sDI += (1 - Math.min(100, h) / 100) * psat(t) / 1000; }
+        if (r === r) { nR++; sR += r; }
+        if (r === r && v === v && d === d) {
+          nDR++;
+          if (r > 0 && v > 0) {
+            const base2 = (2 / 9) * v * Math.pow(r, 8 / 9);
+            for (let o = 0; o < 8; o++) { const c = Math.cos((d - ORIENT[o][1]) * Math.PI / 180); if (c > 0) dr[o] += base2 * c; }
+          }
+        }
+      }
+      const cT = nT / len, cDI = nDI / len, cR = nR / len, cDR = nDR / len;
+      years.push({
+        y, cT, cDI, cDR, cR, meanT: nT ? sT / nT : NaN, meanRH: nRH ? sRH / nRH : NaN,
+        rain: cR ? sR / cR : NaN, DI: cDI ? sDI / cDI : NaN, DR: Array.from(dr, x => cDR ? x / cDR : NaN),
+      });
+    }
+    state.result = { y0, y1, base, n, T, RH, R, WS, WD, years };
+    done(li, `Rangordnar ${years.length} år`);
+    rank();
+  } catch (e) {
+    log(e.message, "err");
+  } finally { btn.disabled = false; }
+}
+
+function rank() {
+  const res = state.result; if (!res) return;
+  const crit = $("crit").value, level = +$("level").value, MIN = 0.85;
+  const need = { mi: ["cT", "cDI", "cDR"], dr: ["cDR"], cold: ["cT"] }[crit];
+  const ok = res.years.filter(y => need.every(k => y[k] >= MIN));
+  // orientering
+  let oi;
+  if ($("orient").value === "auto") {
+    const tot = ORIENT.map((_, o) => ok.reduce((s, y) => s + (y.DR[o] || 0), 0));
+    oi = tot.indexOf(Math.max(...tot));
+  } else oi = ORIENT.findIndex(o => String(o[1]) === $("orient").value);
+  const maxDR = Math.max(...ok.map(y => y.DR[oi])), maxDI = Math.max(...ok.map(y => y.DI));
+  for (const y of res.years) {
+    y.ok = ok.includes(y);
+    y.dr = y.DR[oi];
+    y.mi = Math.sqrt((1 - y.DI / maxDI) ** 2 + (y.dr / maxDR) ** 2);
+    y.metric = crit === "mi" ? y.mi : crit === "dr" ? y.dr : y.meanT;
+    y.sev = crit === "cold" ? -y.meanT : y.metric;
+  }
+  const sorted = ok.slice().sort((a, b) => b.sev - a.sev);
+  sorted.forEach((y, i) => y.rank = i + 1);
+  res.years.filter(y => !y.ok).forEach(y => y.rank = null);
+  const k = Math.max(1, Math.round(level * sorted.length));
+  res.crit = crit; res.oi = oi; res.critYear = sorted[k - 1]?.y ?? null; res.nOk = sorted.length; res.k = k;
+  if (!sorted.length) { log("Inget år har tillräcklig datatäckning. Byt station eller period.", "err"); renderResults(); return; }
+  buildYear(res.critYear);
+}
+
+/* ---------- bygg timfil för valt år ---------- */
+function longGaps(seg, min = 7) {
+  let run = 0; for (let i = 0; i < seg.length; i++) { if (seg[i] !== seg[i]) { if (++run >= min) return true; } else run = 0; } return false;
+}
+function fillFrom(seg, src, flags, bit, min = 7) {
+  let c = 0, i = 0;
+  while (i < seg.length) {
+    if (seg[i] === seg[i]) { i++; continue; }
+    let j = i; while (j < seg.length && seg[j] !== seg[j]) j++;
+    if (j - i >= min) for (let k = i; k < j; k++) if (src[k] === src[k]) { seg[k] = src[k]; flags[k] |= bit; c++; }
+    i = j;
+  }
+  return c;
+}
+function interp(seg, flags, bit) {
+  let c = 0, prev = -1;
+  for (let i = 0; i <= seg.length; i++) {
+    if (i < seg.length && seg[i] !== seg[i]) continue;
+    if (i - prev > 1) {
+      for (let k = prev + 1; k < i; k++) {
+        const a = prev >= 0 ? seg[prev] : seg[i], b = i < seg.length ? seg[i] : seg[prev];
+        if (a !== a && b !== b) continue;
+        const f = prev >= 0 && i < seg.length ? (k - prev) / (i - prev) : 0;
+        seg[k] = prev >= 0 ? a + (b - a) * f : b; flags[k] |= bit; c++;
+      }
+    }
+    prev = i;
+  }
+  return c;
+}
+function interpDir(dir, flags, bit) {
+  const u = dir.map(d => d === d ? Math.sin(d * Math.PI / 180) : NaN), v = dir.map(d => d === d ? Math.cos(d * Math.PI / 180) : NaN);
+  const f2 = new Uint16Array(dir.length);
+  interp(u, f2, 1); interp(v, f2, 1); let c = 0;
+  for (let i = 0; i < dir.length; i++) if (dir[i] !== dir[i] && u[i] === u[i]) { dir[i] = (Math.atan2(u[i], v[i]) * 180 / Math.PI + 360) % 360; flags[i] |= bit; c++; }
+  return c;
+}
+
+async function strang(param, y, len) {
+  const from = new Date(Date.UTC(y, 0, 1) - H).toISOString().slice(0, 19) + "Z";
+  const to = new Date(Date.UTC(y, 0, 1) - H + (len - 1) * H).toISOString().slice(0, 19) + "Z";
+  const url = `${STRANG}/lon/${state.lon.toFixed(4)}/lat/${state.lat.toFixed(4)}/parameter/${param}/data.json?from=${from}&to=${to}&interval=hourly`;
+  const out = new Float32Array(len).fill(NaN); const t0 = Date.UTC(y, 0, 1) - H;
+  const r = await fetch(url);
+  if (r.status === 404) return null; // parametern finns inte för perioden
+  if (!r.ok) throw new Error(r.status + " " + url);
+  const data = await r.json();
+  if (Array.isArray(data)) for (const d of data) {
+    const k = (Date.parse(d.date_time) - t0) / H; if (k >= 0 && k < len && d.value > -1) out[k] = Math.max(0, d.value);
+  }
+  return out;
+}
+
+// sin(solhöjd) vid tidpunkten t (ms UTC), NOAA:s förenklade formler
+function sunSin(t, lat, lon) {
+  const d = new Date(t), doy = (t - Date.UTC(d.getUTCFullYear(), 0, 1)) / 864e5;
+  const g = 2 * Math.PI / 365 * (doy - 0.5);
+  const eot = 229.18 * (0.000075 + 0.001868 * Math.cos(g) - 0.032077 * Math.sin(g) - 0.014615 * Math.cos(2 * g) - 0.040849 * Math.sin(2 * g));
+  const decl = 0.006918 - 0.399912 * Math.cos(g) + 0.070257 * Math.sin(g) - 0.006758 * Math.cos(2 * g) + 0.000907 * Math.sin(2 * g) - 0.002697 * Math.cos(3 * g) + 0.00148 * Math.sin(3 * g);
+  const minutes = (t % 864e5) / 6e4 + eot + 4 * lon;
+  const ha = (minutes / 4 - 180) * Math.PI / 180, la = lat * Math.PI / 180;
+  return Math.sin(la) * Math.sin(decl) + Math.cos(la) * Math.cos(decl) * Math.cos(ha);
+}
+
+const BITS = { T: 1, RH: 2, R: 4, WS: 8, WD: 16, G: 32, D: 64, DN: 128, N: 256, P: 512 };
+const BITNAME = { 1: "T", 2: "RF", 4: "Nb", 8: "Vh", 16: "Vr", 32: "G", 64: "Dif", 128: "Dn", 256: "Moln", 512: "Tryck" };
+
+async function buildYear(y) {
+  const res = state.result; state.selYear = y; state.csv = null;
+  renderResults();
+  const li = log(`Bygger timfil för ${y}`);
+  try {
+    const { base, n } = res, len = hoursIn(y), i0 = (Date.UTC(y, 0, 1) - H - base) / H;
+    const seg = a => Float32Array.from(a.subarray(i0, i0 + len));
+    const S = { T: seg(res.T), RH: seg(res.RH), R: seg(res.R), WS: seg(res.WS), WD: seg(res.WD) };
+    const flags = new Uint16Array(len), stat = {};
+    // moln och tryck: bara valt år behövs
+    const [N, P] = await pool([
+      () => state.sel.CLOUD ? loadSeries(16, state.sel.CLOUD, base, n, "Molnmängd") : new Float32Array(n).fill(NaN),
+      () => state.sel.PRES ? loadSeries(9, state.sel.PRES, base, n, "Lufttryck") : new Float32Array(n).fill(NaN),
+    ], 2);
+    S.N = seg(N); S.P = seg(P);
+    // reservstationer för långa luckor
+    const plan = [["T", "T", 1], ["RH", "RH", 6], ["R", "RAIN", 7], ["N", "CLOUD", 16], ["P", "PRES", 9]];
+    for (const [key, g, p] of plan) {
+      stat[key] = { backup: 0, interp: 0 };
+      if (!longGaps(S[key])) continue;
+      const bk = (state.cand[g] || []).find(c => c.id !== state.sel[g]); if (!bk) continue;
+      const arr = await loadSeries(p, bk.id, base, n, `Reserv ${GROUPS[g].label}`);
+      stat[key].backup = fillFrom(S[key], arr.subarray(i0, i0 + len), flags, BITS[key]); stat[key].bkName = bk.name;
+    }
+    stat.WS = { backup: 0, interp: 0 }; stat.WD = { backup: 0, interp: 0 };
+    if (longGaps(S.WS) || longGaps(S.WD)) {
+      const bk = (state.cand.WIND || []).find(c => c.id !== state.sel.WIND);
+      if (bk) {
+        const [ws, wd] = [await loadSeries(4, bk.id, base, n, "Reserv vindhastighet"), await loadSeries(3, bk.id, base, n, "Reserv vindriktning")];
+        stat.WS.backup = fillFrom(S.WS, ws.subarray(i0, i0 + len), flags, BITS.WS); stat.WS.bkName = bk.name;
+        stat.WD.backup = fillFrom(S.WD, wd.subarray(i0, i0 + len), flags, BITS.WD);
+      }
+    }
+    for (const k of ["T", "RH", "WS", "N", "P"]) stat[k].interp = interp(S[k], flags, BITS[k]);
+    stat.WD.interp = interpDir(S.WD, flags, BITS.WD);
+    stat.R.interp = 0; for (let i = 0; i < len; i++) if (S.R[i] !== S.R[i]) { S.R[i] = 0; flags[i] |= BITS.R; stat.R.interp++; }
+    // STRÅNG
+    const ls = log("Hämtar STRÅNG-strålning för vald punkt");
+    let [G, D, DN] = await pool([() => strang(117, y, len), () => strang(122, y, len), () => strang(118, y, len)], 3);
+    if (!G || !DN) throw new Error("STRÅNG saknar strålningsdata för året på den här platsen");
+    let derived = false;
+    if (!D) { // diffus finns i STRÅNG först från 2017: D = G − DNI·sin(solhöjd)
+      derived = true;
+      const t0 = Date.UTC(y, 0, 1) - H;
+      D = new Float32Array(len);
+      for (let i = 0; i < len; i++) D[i] = G[i] === G[i] && DN[i] === DN[i] ? Math.max(0, G[i] - DN[i] * Math.max(0, sunSin(t0 + i * H, state.lat, state.lon))) : NaN;
+    }
+    done(ls, derived ? "STRÅNG: global- och direkt normalstrålning (diffus härledd)" : "STRÅNG: global-, diffus- och direkt normalstrålning");
+    S.G = G; S.D = D; S.DN = DN; stat.diffDerived = derived;
+    for (const k of ["G", "D", "DN"]) stat[k] = { backup: 0, interp: interp(S[k], flags, BITS[k]) };
+    // härledda storheter
+    const tSt = (state.cand.T || []).find(c => c.id === state.sel.T), hgt = tSt?.h ?? 0;
+    const LW = new Float32Array(len), Pst = new Float32Array(len);
+    for (let i = 0; i < len; i++) {
+      const Tk = S.T[i] + 273.15, e = Math.min(100, Math.max(0, S.RH[i])) / 100 * psat(S.T[i]) / 100;
+      const cl = S.N[i] === S.N[i] ? Math.min(1, Math.max(0, S.N[i] / 100)) : 0.6;
+      const eps = cl + (1 - cl) * 1.24 * Math.pow(e / Tk, 1 / 7);
+      LW[i] = eps * 5.670374e-8 * Tk ** 4;
+      Pst[i] = S.P[i] === S.P[i] ? S.P[i] * Math.pow(1 - 2.25577e-5 * hgt, 5.25588) : NaN;
+    }
+    if (stat.N.interp === len) log("Molndata saknas helt för året; motstrålningen beräknas med 60 % molnighet", "err");
+    state.built = { y, len, S, LW, Pst, flags, stat, hgt };
+    makeCSV();
+    done(li); log(`Timfil för ${y} klar`, "ok");
+  } catch (e) { done(li, `Kunde inte bygga ${y}: ${e.message}`, "err"); }
+  renderResults();
+}
+
+function makeCSV() {
+  const b = state.built; if (!b) return;
+  const sv = $("sep").value === "sv", sep = sv ? ";" : ",", noleap = $("noleap").checked;
+  const f = (x, d) => x === x ? (sv ? x.toFixed(d).replace(".", ",") : x.toFixed(d)) : "";
+  const res = state.result, yObj = res.years.find(q => q.y === b.y);
+  const stName = g => (state.cand[g] || []).find(c => c.id === state.sel[g]);
+  const L = [];
+  if ($("meta").checked) {
+    L.push(`# Fuktår – klimatfil skapad ${new Date().toISOString().slice(0, 10)} från SMHI öppna data (CC BY 4.0)`);
+    L.push(`# Plats: ${state.lat.toFixed(4)} N, ${state.lon.toFixed(4)} E; år ${b.y}; kriterium ${critLabel()} ${orientLabel()}; rang ${yObj?.rank ?? "–"} av ${res.nOk} (period ${res.y0}–${res.y1})`);
+    for (const g of Object.keys(GROUPS)) { const c = stName(g); if (c) L.push(`# ${GROUPS[g].label}: ${c.name} (${c.id}), ${c.d.toFixed(0)} km, ${c.h} m ö.h.`); }
+    L.push(`# Strålning: SMHI STRÅNG för platsen. Motstrålning beräknad (Brutsaert + Crawford & Duchon). Lufttryck omräknat till ${b.hgt.toFixed(0)} m ö.h.`);
+    L.push(`# Tid: svensk normaltid UTC+1. Ifyllt = parametrar som fyllts i (reservstation eller interpolation).`);
+  }
+  L.push(["Tid (UTC+1)", "Temperatur [°C]", "Relativ fuktighet [%]", "Nederbörd [mm/h]", "Vindhastighet [m/s]", "Vindriktning [°]",
+    "Globalstrålning [W/m²]", "Diffusstrålning [W/m²]", "Direkt normalstrålning [W/m²]", "Molnmängd [-]",
+    "Atmosfärisk motstrålning [W/m²]", "Lufttryck [hPa]", "Ifyllt"].join(sep));
+  const S = b.S, t0 = Date.UTC(b.y, 0, 1);
+  let rows = 0;
+  for (let i = 0; i < b.len; i++) {
+    const d = new Date(t0 + i * H);
+    if (noleap && d.getUTCMonth() === 1 && d.getUTCDate() === 29) continue;
+    const ts = d.toISOString().slice(0, 13).replace("T", " ") + ":00";
+    const fl = []; for (const bit in BITNAME) if (b.flags[i] & bit) fl.push(BITNAME[bit]);
+    L.push([ts, f(S.T[i], 1), f(Math.min(100, Math.max(0, S.RH[i])), 0), f(S.R[i], 1), f(S.WS[i], 1), f(S.WD[i], 0),
+      f(S.G[i], 1), f(Math.min(S.D[i], S.G[i]), 1), f(S.DN[i], 1), f(S.N[i] === S.N[i] ? Math.min(1, Math.max(0, S.N[i] / 100)) : NaN, 2),
+      f(b.LW[i], 1), f(b.Pst[i], 1), fl.join(" ")].join(sep));
+    rows++;
+  }
+  state.csv = (sv ? "﻿" : "") + L.join("\r\n") + "\r\n";
+  state.rows = rows;
+  const place = (state.cand.T?.find(c => c.id === state.sel.T)?.name || `${state.lat.toFixed(2)}_${state.lon.toFixed(2)}`).replace(/[^\wåäöÅÄÖ-]+/g, "_");
+  state.fileName = `fuktar_${place}_${b.y}_${res.crit}.csv`;
+}
+["sep", "noleap", "meta"].forEach(id => $(id).addEventListener("change", () => { if (state.built) { makeCSV(); renderResults(); } }));
+["crit", "orient", "level"].forEach(id => $(id).addEventListener("change", () => { if (state.result) rank(); }));
+
+function critLabel() { return { mi: "fuktindex", dr: "slagregn", cold: "kallt år" }[state.result?.crit] || ""; }
+function orientLabel() { const o = ORIENT[state.result?.oi]; return o ? `(fasad mot ${o[0]})` : ""; }
+
+/* ---------- presentation ---------- */
+function niceTicks(lo, hi, n = 4) {
+  const step0 = (hi - lo) / n, p = 10 ** Math.floor(Math.log10(step0)), m = step0 / p;
+  const step = (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * p;
+  const t = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) t.push(+v.toFixed(10));
+  return t;
+}
+
+function chartSVG() {
+  const res = state.result, ys = res.years, W = 720, Hh = 250, ml = 46, mr = 10, mt = 14, mb = 30;
+  const vals = ys.map(y => y.metric).filter(v => v === v);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (res.crit !== "cold") lo = 0; else { const pad = (hi - lo) * 0.15 || 0.5; lo -= pad; hi += pad; }
+  if (hi === lo) hi = lo + 1;
+  const ticks = niceTicks(lo, hi); lo = Math.min(lo, ticks[0]); hi = Math.max(hi, ticks[ticks.length - 1]);
+  const bw = (W - ml - mr) / ys.length, yS = v => mt + (Hh - mt - mb) * (1 - (v - lo) / (hi - lo));
+  const dec = res.crit === "mi" ? 2 : res.crit === "dr" ? 0 : 1;
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Rangordning av år">`;
+  for (const t of ticks) s += `<line x1="${ml}" x2="${W - mr}" y1="${yS(t)}" y2="${yS(t)}" stroke="var(--line)"/><text x="${ml - 6}" y="${yS(t) + 4}" text-anchor="end">${t.toFixed(dec)}</text>`;
+  const every = ys.length > 24 ? 2 : 1;
+  ys.forEach((y, i) => {
+    const x = ml + i * bw, v = y.metric;
+    const fill = !y.ok ? "transparent" : y.y === res.critYear ? "var(--crit)" : y.y === state.selYear ? "var(--accent)" : "var(--muted)";
+    const op = !y.ok || y.y === state.selYear || y.y === res.critYear ? 1 : 0.45;
+    if (v === v) {
+      const top = yS(Math.max(v, lo)), bot = yS(lo);
+      s += `<rect class="bar" data-y="${y.y}" x="${x + bw * 0.15}" y="${top}" width="${bw * 0.7}" height="${Math.max(1, bot - top)}" rx="2" fill="${fill}" fill-opacity="${op}" stroke="${y.ok ? "none" : "var(--muted)"}" stroke-dasharray="${y.ok ? "" : "3 2"}"><title>${y.y}: ${v.toFixed(dec)}${y.ok ? ` · rang ${y.rank}` : " · för låg datatäckning"}</title></rect>`;
+    }
+    if (i % every === 0 || y.y === res.critYear) s += `<text x="${x + bw / 2}" y="${Hh - mb + 16}" text-anchor="middle"${y.y === res.critYear ? ' style="fill:var(--crit);font-weight:600"' : ""}>${String(y.y).slice(2)}</text>`;
+  });
+  return s + "</svg>";
+}
+
+function renderResults() {
+  const res = state.result, body = $("res-body");
+  if (!res) return;
+  const unit = { mi: "fuktindex MI (–)", dr: "slagregn mot fasad (l/m²·år)", cold: "årsmedeltemperatur (°C)" }[res.crit];
+  const okYears = res.years.filter(y => y.ok), mean = k => okYears.reduce((s, y) => s + y[k], 0) / okYears.length;
+  const sel = res.years.find(y => y.y === state.selYear);
+  $("res-pill").innerHTML = res.critYear ? `<span class="pill">Kritiskt år: ${res.critYear}</span>` : "";
+  let h = `<div class="headrow"><h3>${state.selYear ?? "–"} ${state.selYear === res.critYear ? `<span class="pill">rang ${res.k} av ${res.nOk}</span>` : sel?.rank ? `<span class="pill sel">rang ${sel.rank} av ${res.nOk}</span>` : ""}</h3>
+    <span class="hint">${critLabel()} ${orientLabel()} · ${res.y0}–${res.y1}</span></div>
+    <div class="chart">${chartSVG()}</div>
+    <div class="legend"><span><i style="background:var(--crit)"></i>Kritiskt år (${$("level").selectedOptions[0].text.split(" (")[0]})</span><span><i style="background:var(--accent)"></i>Valt år</span><span><i style="border:1px dashed var(--muted)"></i>För låg datatäckning</span><span>Y-axel: ${unit}. Klicka på en stapel för att välja ett annat år.</span></div>`;
+  if (sel) {
+    const o = ORIENT[res.oi][0];
+    const tile = (k, v, d) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`;
+    const diff = (a, b, dd) => (a - b >= 0 ? "+" : "−") + Math.abs(a - b).toFixed(dd);
+    h += `<div class="tiles">
+      ${tile("Årsmedeltemperatur", sel.meanT.toFixed(1) + " °C", `periodmedel ${mean("meanT").toFixed(1)} (${diff(sel.meanT, mean("meanT"), 1)})`)}
+      ${tile("Nederbörd", sel.rain.toFixed(0) + " mm", `periodmedel ${mean("rain").toFixed(0)}`)}
+      ${tile("Slagregn mot " + o, sel.dr.toFixed(0) + " l/m²", `periodmedel ${mean("dr").toFixed(0)}`)}
+      ${tile("Medel-RF", sel.meanRH.toFixed(0) + " %", `fuktindex ${sel.mi.toFixed(2)}`)}
+    </div>`;
+  }
+  const b = state.built;
+  if (b && b.y === state.selYear && state.csv) {
+    const names = { T: "Temperatur", RH: "RF", R: "Nederbörd", WS: "Vindhastighet", WD: "Vindriktning", N: "Molnmängd", P: "Lufttryck", G: "Global", D: "Diffus", DN: "Direkt normal" };
+    const q = Object.entries(names).map(([k, nm]) => { const s = b.stat[k] || {}; const pct = ((s.backup || 0) + (s.interp || 0)) / b.len * 100;
+      return `<tr><td>${nm}</td><td class="mono">${(100 - pct).toFixed(1)} %</td><td class="mono">${s.backup || 0}${s.bkName ? ` <span class="hint">(${s.bkName})</span>` : ""}</td><td class="mono">${s.interp || 0}</td></tr>`; }).join("");
+    const preview = state.csv.replace(/^﻿/, "").split("\r\n").filter(l => !l.startsWith("#")).slice(0, 7).join("\n");
+    h += `<div class="headrow"><h3>Klimatfil</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="dl" type="button">Ladda ner CSV</button><button class="btn ghost" id="cp" type="button">Kopiera</button></div></div>
+      <p class="hint mono">${state.fileName} · ${state.rows} timmar · ${(state.csv.length / 1024).toFixed(0)} kB</p>
+      <pre>${preview.replace(/</g, "&lt;")}</pre>
+      <details><summary>Datakvalitet för ${b.y}</summary><div class="tablewrap"><table><thead><tr><th>Parameter</th><th>Uppmätt</th><th>Från reserv (h)</th><th>Interpolerat (h)</th></tr></thead><tbody>${q}</tbody></table></div></details>`;
+  } else if (state.selYear) h += `<p class="hint">Bygger timfil …</p>`;
+  body.innerHTML = h;
+  body.querySelectorAll(".bar").forEach(r => r.addEventListener("click", () => { const y = +r.dataset.y; if (y !== state.selYear) buildYear(y); }));
+  $("dl")?.addEventListener("click", download);
+  $("cp")?.addEventListener("click", async e => {
+    try { await navigator.clipboard.writeText(state.csv.replace(/^﻿/, "")); e.target.textContent = "Kopierat"; }
+    catch { e.target.textContent = "Kopiering blockerad"; }
+    setTimeout(() => e.target.textContent = "Kopiera", 2000);
+  });
+}
+
+function download() {
+  const blob = new Blob([state.csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = state.fileName;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+$("run").addEventListener("click", run);
+
+/* ---------- start ---------- */
+initMap();
+loadStations().then(() => computeCandidates()).catch(e => {
+  $("st-note").textContent = "Kunde inte nå SMHI: " + e.message; $("st-note").style.color = "var(--bad)";
+});
+</script>
+</body>
+</html>
