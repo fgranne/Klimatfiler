@@ -74,6 +74,7 @@ td select{padding:4px 6px;font-size:.82rem}
 .pill{display:inline-block;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--crit-soft);color:var(--crit)}
 .pill.sel{background:var(--accent-soft);color:var(--accent)}
 pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow-x:auto;font:11.5px/1.5 var(--f-mono);margin:0}
+#cite{white-space:pre-wrap;overflow-wrap:anywhere}
 details summary{cursor:pointer;font-weight:600}
 details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
 .headrow{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between}
@@ -184,12 +185,35 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
         </ul>
       </details>
     </section>
+
+    <section class="panel" aria-labelledby="h-ref">
+      <h2 id="h-ref">Hur ska jag referera till verktyget?</h2>
+      <p class="hint">Ange versionen och datumet då du tog fram klimatfilen, eftersom resultatet beror på vilka SMHI-data som fanns då. Ange också SMHI som källa till mätdatan.</p>
+      <pre id="cite"></pre>
+      <div><button type="button" class="btn ghost" id="cite-copy">Kopiera referensen</button> <span class="hint" id="cite-note"></span></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-ver">
+      <h2 id="h-ver">Version <span id="version"></span></h2>
+      <details>
+        <summary>Ändringslogg</summary>
+        <ul>
+          <li><b>1.1 – 2026-11-20</b>: Plats kan förifyllas via länk (<code>?lat=…&amp;lon=…&amp;ort=…</code>), används av Ortsklimat. Versionsnummer, ändringslogg och referensruta.</li>
+          <li><b>1.0 – 2026-10-15</b>: Första publicerade versionen: val av kritiskt fuktår (slagregn och uttorkningspotential) ur SMHI:s mätdata och STRÅNG-strålning, export av klimatfil som CSV.</li>
+        </ul>
+      </details>
+    </section>
   </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
 "use strict";
+// Uppdatera vid varje ändring, tillsammans med ändringsloggen i avsnittet Version
+const APP_VERSION = "1.1";
+const APP_URL = "https://fgranne.github.io/Klimatfiler/";
+const APP_AUTHOR = "";   // Fyll i upphovsperson, t.ex. "Efternamn, F.", så kommer den först i referensen
+
 const API = "https://opendata-download-metobs.smhi.se/api/version/1.0";
 const STRANG = "https://opendata-download-metanalys.smhi.se/api/category/strang1g/version/1/geotype/point";
 const H = 3600000, YR = 365.25 * 24 * H;
@@ -210,6 +234,12 @@ const state = {
   lat: 57.7089, lon: 11.9746, stations: {}, cand: {}, sel: {},
   csvCache: new Map(), result: null, selYear: null, csv: null, fileName: null,
 };
+
+// Förifylld plats via länk, t.ex. ?lat=57.7211&lon=12.9407&ort=Borås (används av Ortsklimat)
+const linkParams = new URLSearchParams(location.search);
+const linkLat = parseFloat(linkParams.get("lat")), linkLon = parseFloat(linkParams.get("lon"));
+const fromLink = linkLat >= 54 && linkLat <= 70 && linkLon >= 10 && linkLon <= 25;
+if (fromLink) { state.lat = linkLat; state.lon = linkLon; }
 
 /* ---------- hjälpfunktioner ---------- */
 const now = new Date();
@@ -727,8 +757,26 @@ function download() {
 
 $("run").addEventListener("click", run);
 
+/* ---------- version och referens ---------- */
+$("version").textContent = APP_VERSION;
+{
+  const today = new Date().toISOString().slice(0, 10);
+  $("cite").textContent = (APP_AUTHOR ? APP_AUTHOR + " (" + today.slice(0, 4) + "). " : "") +
+    "Fuktår: kritiska klimatår för fuktberäkningar (version " + APP_VERSION + ") [Webbverktyg]. " + APP_URL +
+    ". Hämtad " + today + ". Underlagsdata: SMHI, öppna data och STRÅNG (CC BY 4.0).";
+  $("cite-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("cite").textContent); $("cite-note").textContent = "Kopierad."; }
+    catch (e) { $("cite-note").textContent = "Kunde inte kopiera – markera texten och kopiera själv."; }
+  });
+}
+
 /* ---------- start ---------- */
 initMap();
+if (fromLink) {
+  $("lat").value = state.lat.toFixed(4); $("lon").value = state.lon.toFixed(4);
+  if (linkParams.get("ort")) $("search").value = linkParams.get("ort");
+  map.setView([state.lat, state.lon], 8);
+}
 loadStations().then(() => computeCandidates()).catch(e => {
   $("st-note").textContent = "Kunde inte nå SMHI: " + e.message; $("st-note").style.color = "var(--bad)";
 });
