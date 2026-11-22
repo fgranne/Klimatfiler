@@ -104,6 +104,7 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
         <label for="lon">Longitud<input type="number" id="lon" step="0.0001" value="11.9746"></label>
       </div>
       <p class="hint">Klicka i kartan, sök på ett stationsnamn eller ange koordinater.</p>
+      <p class="hint"><a id="ortlink" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">Visa ortens klimatdata i Ortsklimat →</a></p>
     </section>
 
     <section class="panel" aria-labelledby="h-analys">
@@ -198,6 +199,7 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
       <details>
         <summary>Ändringslogg</summary>
         <ul>
+          <li><b>1.3 – 2026-11-22</b>: Länk till Ortsklimat med vald plats.</li>
           <li><b>1.2 – 2026-11-22</b>: Export direkt till WUFI (.wac) och till energisimulering (EnergyPlus .epw), utöver CSV.</li>
           <li><b>1.1 – 2026-11-20</b>: Plats kan förifyllas via länk (<code>?lat=…&amp;lon=…&amp;ort=…</code>), används av Ortsklimat. Versionsnummer, ändringslogg och referensruta.</li>
           <li><b>1.0 – 2026-10-15</b>: Första publicerade versionen: val av kritiskt fuktår (slagregn och uttorkningspotential) ur SMHI:s mätdata och STRÅNG-strålning, export av klimatfil som CSV.</li>
@@ -211,8 +213,9 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
 <script>
 "use strict";
 // Uppdatera vid varje ändring, tillsammans med ändringsloggen i avsnittet Version
-const APP_VERSION = "1.2";
+const APP_VERSION = "1.3";
 const APP_URL = "https://fgranne.github.io/Klimatfiler/";
+const ORTSKLIMAT_URL = "https://fgranne.github.io/Ortsklimat/";   // tar emot ?lat=…&lon=…&ort=…
 const APP_AUTHOR = "";   // Fyll i upphovsperson, t.ex. "Efternamn, F.", så kommer den först i referensen
 
 const API = "https://opendata-download-metobs.smhi.se/api/version/1.0";
@@ -352,7 +355,7 @@ function initMap() {
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 13, attribution: "© OpenStreetMap" }).addTo(map);
   here = L.circleMarker([state.lat, state.lon], { radius: 8, color: "#B4731A", weight: 3, fillOpacity: .3 }).addTo(map);
   stLayer = L.layerGroup().addTo(map);
-  map.on("click", e => setLocation(e.latlng.lat, e.latlng.lng, false));
+  map.on("click", e => { state.placeName = ""; setLocation(e.latlng.lat, e.latlng.lng, false); });
 }
 function drawStationMarkers() {
   if (!stLayer) return; stLayer.clearLayers(); const seen = new Set();
@@ -367,12 +370,18 @@ function setLocation(lat, lon, pan = true) {
   if (here) here.setLatLng([state.lat, state.lon]);
   if (map && pan) map.setView([state.lat, state.lon], Math.max(map.getZoom(), 8));
   computeCandidates();
+  updateOrtLink();
 }
-$("lat").addEventListener("change", () => setLocation($("lat").value, $("lon").value));
-$("lon").addEventListener("change", () => setLocation($("lat").value, $("lon").value));
+// Länk till Ortsklimat med samma punkt; ortnamnet skickas bara med när platsen valts via sökning eller länk
+function updateOrtLink() {
+  $("ortlink").href = ORTSKLIMAT_URL + "?lat=" + state.lat.toFixed(4) + "&lon=" + state.lon.toFixed(4) +
+    (state.placeName ? "&ort=" + encodeURIComponent(state.placeName) : "");
+}
+$("lat").addEventListener("change", () => { state.placeName = ""; setLocation($("lat").value, $("lon").value); });
+$("lon").addEventListener("change", () => { state.placeName = ""; setLocation($("lat").value, $("lon").value); });
 $("search").addEventListener("change", () => {
   const s = state.nameIndex?.get($("search").value.trim().toLowerCase());
-  if (s) setLocation(s.lat, s.lon);
+  if (s) { state.placeName = $("search").value.trim(); setLocation(s.lat, s.lon); }
 });
 $("y0").addEventListener("change", computeCandidates);
 $("y1").addEventListener("change", computeCandidates);
@@ -862,9 +871,10 @@ $("version").textContent = APP_VERSION;
 initMap();
 if (fromLink) {
   $("lat").value = state.lat.toFixed(4); $("lon").value = state.lon.toFixed(4);
-  if (linkParams.get("ort")) $("search").value = linkParams.get("ort");
+  if (linkParams.get("ort")) $("search").value = state.placeName = linkParams.get("ort");
   map.setView([state.lat, state.lon], 8);
 }
+updateOrtLink();
 loadStations().then(() => computeCandidates()).catch(e => {
   $("st-note").textContent = "Kunde inte nå SMHI: " + e.message; $("st-note").style.color = "var(--bad)";
 });
