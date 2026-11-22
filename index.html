@@ -198,6 +198,7 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
       <details>
         <summary>Ändringslogg</summary>
         <ul>
+          <li><b>1.2 – 2026-11-22</b>: Export direkt till WUFI (.wac) och till energisimulering (EnergyPlus .epw), utöver CSV.</li>
           <li><b>1.1 – 2026-11-20</b>: Plats kan förifyllas via länk (<code>?lat=…&amp;lon=…&amp;ort=…</code>), används av Ortsklimat. Versionsnummer, ändringslogg och referensruta.</li>
           <li><b>1.0 – 2026-10-15</b>: Första publicerade versionen: val av kritiskt fuktår (slagregn och uttorkningspotential) ur SMHI:s mätdata och STRÅNG-strålning, export av klimatfil som CSV.</li>
         </ul>
@@ -210,7 +211,7 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
 <script>
 "use strict";
 // Uppdatera vid varje ändring, tillsammans med ändringsloggen i avsnittet Version
-const APP_VERSION = "1.1";
+const APP_VERSION = "1.2";
 const APP_URL = "https://fgranne.github.io/Klimatfiler/";
 const APP_AUTHOR = "";   // Fyll i upphovsperson, t.ex. "Efternamn, F.", så kommer den först i referensen
 
@@ -627,7 +628,7 @@ async function buildYear(y) {
     }
     if (stat.N.interp === len) log("Molndata saknas helt för året; motstrålningen beräknas med 60 % molnighet", "err");
     state.built = { y, len, S, LW, Pst, flags, stat, hgt };
-    makeCSV();
+    makeCSV(); makeWAC(); makeEPW();
     done(li); log(`Timfil för ${y} klar`, "ok");
   } catch (e) { done(li, `Kunde inte bygga ${y}: ${e.message}`, "err"); }
   renderResults();
@@ -667,6 +668,90 @@ function makeCSV() {
   const place = (state.cand.T?.find(c => c.id === state.sel.T)?.name || `${state.lat.toFixed(2)}_${state.lon.toFixed(2)}`).replace(/[^\wåäöÅÄÖ-]+/g, "_");
   state.fileName = `fuktar_${place}_${b.y}_${res.crit}.csv`;
 }
+/* ---------- export till WUFI (.wac) och energisimulering (.epw) ---------- */
+// Båda formaten får alltid 8760 timmar (29 februari tas bort), eftersom WUFI inte hanterar skottdagar.
+function exportRows() {
+  const b = state.built, t0 = Date.UTC(b.y, 0, 1), idx = [];
+  for (let i = 0; i < b.len; i++) { const d = new Date(t0 + i * H); if (!(d.getUTCMonth() === 1 && d.getUTCDate() === 29)) idx.push(i); }
+  return idx;
+}
+function placeLabel() {
+  return ($("search").value.trim() || state.cand.T?.find(c => c.id === state.sel.T)?.name || `${state.lat.toFixed(2)} N ${state.lon.toFixed(2)} E`);
+}
+const asciiText = s => s.replace(/[åä]/g, "a").replace(/[ÅÄ]/g, "A").replace(/ö/g, "o").replace(/Ö/g, "O").replace(/[éè]/g, "e")
+  .replace(/–/g, "-").replace(/[^\x20-\x7e]/g, "").replace(/[,;]/g, " ");
+const clamp = (v, a, c) => Math.min(c, Math.max(a, v));
+
+function makeWAC() {
+  // WUFI ASCII Climate, huvud enligt IBP:s exempel (WUFI®_WAC_02). Fält åtskilda med tabb, horisontella storheter.
+  const b = state.built, S = b.S, idx = exportRows();
+  const cols = [
+    ["TA", i => S.T[i], 1],                                 // lufttemperatur [°C]
+    ["HREL", i => clamp(S.RH[i], 0, 100) / 100, 3],         // relativ fuktighet [0..1]
+    ["RN", i => S.R[i], 1],                                 // normalregn mot horisontell yta [mm/h]
+    ["WS", i => S.WS[i], 1],                                // vindhastighet [m/s]
+    ["WD", i => S.WD[i], 0],                                // vindriktning [°], nord = 0
+    ["ISGH", i => S.G[i], 1],                               // globalstrålning horisontell [W/m²]
+    ["ISD", i => Math.min(S.D[i], S.G[i]), 1],              // diffus strålning horisontell [W/m²]
+    ["ILAH", i => b.LW[i], 1],                              // atmosfärisk motstrålning horisontell [W/m²]
+    ["PSTA", i => b.Pst[i], 1],                             // lufttryck på stationshöjd [hPa]
+  ];
+  const used = cols.filter(([, f]) => idx.every(i => Number.isFinite(f(i))));
+  state.wacDropped = cols.filter(c => !used.includes(c)).map(c => c[0]);
+  const res = state.result, yObj = res.years.find(q => q.y === b.y);
+  const txt = s => s.replace(/[\t\r\n]+/g, " ").replace(/[–—]/g, "-");
+  const L = [
+    "WUFI®_WAC_02",
+    "10\tLine Offset to 'Number of Data Columns'",
+    txt(`Fuktår: ${placeLabel()} ${b.y}`),
+    txt(`Kriterium ${critLabel()} ${orientLabel()}, rang ${yObj?.rank ?? "–"} av ${res.nOk} (${res.y0}–${res.y1}). SMHI öppna data och STRÅNG (CC BY 4.0), Fuktår ${APP_VERSION}`),
+    `${state.lon.toFixed(4)}\tLongitude [°]; East is positive`,
+    `${state.lat.toFixed(4)}\tLatitude [°]; North is positive`,
+    `${Math.round(b.hgt)}\tHeightAMSL [m]`,
+    "1.0\tTime Zone [h from UTC]; East is positive",
+    "1\tTime Step [h]",
+    `${idx.length}\tNumber of DataLines`,
+    `${used.length}\tNumber of DataColumns`,
+    used.map(c => c[0]).join("\t"),
+  ];
+  for (const i of idx) L.push(used.map(([, f, d]) => f(i).toFixed(d)).join("\t"));
+  state.wac = L.join("\r\n") + "\r\n";
+  state.wacName = state.fileName.replace(/\.csv$/, ".wac");
+}
+
+function makeEPW() {
+  // EnergyPlus Weather, 8 huvudrader + 35 fält per timme. Timme 1 = första timmen på dygnet (normaltid UTC+1).
+  const b = state.built, S = b.S, idx = exportRows(), t0 = Date.UTC(b.y, 0, 1);
+  const f = (x, d, miss) => Number.isFinite(x) ? x.toFixed(d) : String(miss);
+  const dew = (T, rh) => { const g = Math.log(Math.max(1, rh) / 100) + 17.62 * T / (243.12 + T); return 243.12 * g / (17.62 - g); };
+  const tSt = state.cand.T?.find(c => c.id === state.sel.T);
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const res = state.result;
+  const L = [
+    `LOCATION,${asciiText(placeLabel())},-,SWE,SMHI open data and STRANG,${tSt?.id ?? 999999},${state.lat.toFixed(4)},${state.lon.toFixed(4)},1.0,${Math.round(b.hgt)}`,
+    "DESIGN CONDITIONS,0",
+    "TYPICAL/EXTREME PERIODS,0",
+    "GROUND TEMPERATURES,0",
+    "HOLIDAYS/DAYLIGHT SAVINGS,No,0,0,0",
+    `COMMENTS 1,${asciiText(`Fuktar ${APP_VERSION}: year ${b.y} criterion ${critLabel()} ${orientLabel()} period ${res.y0}-${res.y1}`)}`,
+    `COMMENTS 2,${asciiText("Source SMHI open data and STRANG (CC BY 4.0). Feb 29 removed. Sky IR calculated (Brutsaert + Crawford and Duchon). Gaps filled from backup station or interpolation.")}`,
+    `DATA PERIODS,1,1,Data,${days[new Date(t0).getUTCDay()]},1/1,12/31`,
+  ];
+  for (const i of idx) {
+    const d = new Date(t0 + i * H), T = S.T[i], rh = clamp(S.RH[i], 0, 100);
+    const cl = Number.isFinite(S.N[i]) ? Math.round(clamp(S.N[i], 0, 100) / 10) : 99;
+    L.push([d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours() + 1, 60,
+      "?9?9?9?9E0?9?9?9?9?9?9?9?9?9?9?9?9?9?9?9*9*9?9?9?9",
+      f(T, 1, 99.9), f(dew(T, rh), 1, 99.9), f(rh, 0, 999), f(b.Pst[i] * 100, 0, 999999),
+      9999, 9999, f(b.LW[i], 0, 9999), f(S.G[i], 0, 9999), f(S.DN[i], 0, 9999), f(Math.min(S.D[i], S.G[i]), 0, 9999),
+      999999, 999999, 999999, 9999,
+      f(S.WD[i], 0, 999), f(S.WS[i], 1, 999), cl, cl, 9999, 99999, 9, 999999999, 999, 0.999, 999, 99, 999,
+      f(S.R[i], 1, 999), 1].join(","));
+  }
+  state.epw = L.join("\r\n") + "\r\n";
+  state.epwName = state.fileName.replace(/\.csv$/, ".epw");
+}
+
 ["sep", "noleap", "meta"].forEach(id => $(id).addEventListener("change", () => { if (state.built) { makeCSV(); renderResults(); } }));
 ["crit", "orient", "level"].forEach(id => $(id).addEventListener("change", () => { if (state.result) rank(); }));
 
@@ -734,24 +819,27 @@ function renderResults() {
     const q = Object.entries(names).map(([k, nm]) => { const s = b.stat[k] || {}; const pct = ((s.backup || 0) + (s.interp || 0)) / b.len * 100;
       return `<tr><td>${nm}</td><td class="mono">${(100 - pct).toFixed(1)} %</td><td class="mono">${s.backup || 0}${s.bkName ? ` <span class="hint">(${s.bkName})</span>` : ""}</td><td class="mono">${s.interp || 0}</td></tr>`; }).join("");
     const preview = state.csv.replace(/^﻿/, "").split("\r\n").filter(l => !l.startsWith("#")).slice(0, 7).join("\n");
-    h += `<div class="headrow"><h3>Klimatfil</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="dl" type="button">Ladda ner CSV</button><button class="btn ghost" id="cp" type="button">Kopiera</button></div></div>
+    h += `<div class="headrow"><h3>Klimatfil</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="dl" type="button">Ladda ner CSV</button><button class="btn" id="dl-wac" type="button">WUFI (.wac)</button><button class="btn" id="dl-epw" type="button">EnergyPlus (.epw)</button><button class="btn ghost" id="cp" type="button">Kopiera CSV</button></div></div>
       <p class="hint mono">${state.fileName} · ${state.rows} timmar · ${(state.csv.length / 1024).toFixed(0)} kB</p>
+      <p class="hint">WAC och EPW har alltid 8760 timmar (29 februari tas bort) och tid i normaltid UTC+1.${state.wacDropped?.length ? ` Kolumner som saknar data för året och därför inte följer med i WAC-filen: ${state.wacDropped.join(", ")}.` : ""}</p>
       <pre>${preview.replace(/</g, "&lt;")}</pre>
       <details><summary>Datakvalitet för ${b.y}</summary><div class="tablewrap"><table><thead><tr><th>Parameter</th><th>Uppmätt</th><th>Från reserv (h)</th><th>Interpolerat (h)</th></tr></thead><tbody>${q}</tbody></table></div></details>`;
   } else if (state.selYear) h += `<p class="hint">Bygger timfil …</p>`;
   body.innerHTML = h;
   body.querySelectorAll(".bar").forEach(r => r.addEventListener("click", () => { const y = +r.dataset.y; if (y !== state.selYear) buildYear(y); }));
-  $("dl")?.addEventListener("click", download);
+  $("dl")?.addEventListener("click", () => download(new Blob([state.csv], { type: "text/csv;charset=utf-8" }), state.fileName));
+  // WUFI är ett Windows-program som läser ANSI (Windows-1252); tecken utanför Latin-1 ersätts med ?
+  $("dl-wac")?.addEventListener("click", () => download(new Blob([Uint8Array.from(state.wac, c => c.charCodeAt(0) < 256 ? c.charCodeAt(0) : 63)], { type: "text/plain" }), state.wacName));
+  $("dl-epw")?.addEventListener("click", () => download(new Blob([state.epw], { type: "text/plain" }), state.epwName));
   $("cp")?.addEventListener("click", async e => {
     try { await navigator.clipboard.writeText(state.csv.replace(/^﻿/, "")); e.target.textContent = "Kopierat"; }
     catch { e.target.textContent = "Kopiering blockerad"; }
-    setTimeout(() => e.target.textContent = "Kopiera", 2000);
+    setTimeout(() => e.target.textContent = "Kopiera CSV", 2000);
   });
 }
 
-function download() {
-  const blob = new Blob([state.csv], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = state.fileName;
+function download(blob, name) {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
