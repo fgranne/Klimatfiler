@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fuktår</title>
+<title>Kritiska klimatår</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
@@ -39,6 +39,7 @@ header p{margin:0;color:var(--muted);max-width:60ch}
 h2{font:600 .78rem/1.2 var(--f-display);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0}
 h3{font:600 1.15rem/1.3 var(--f-display);margin:0;text-wrap:balance}
 label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
+label[hidden]{display:none}
 input,select,button{font:inherit;color:var(--ink)}
 input[type=text],input[type=number],select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%;min-width:0}
 input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -86,8 +87,8 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
 </head>
 <body>
 <header>
-  <h1>Fuktår</h1>
-  <p>Kritiska klimatår för WUFI och andra fuktberäkningar, byggda på SMHI:s öppna mätdata och STRÅNG-strålning.</p>
+  <h1>Kritiska klimatår</h1>
+  <p>Referensår för fukt-, värme- och kylberäkningar, byggda på SMHI:s öppna mätdata och STRÅNG-strålning. Export till CSV, WUFI och EnergyPlus.</p>
 </header>
 
 <div class="layout">
@@ -113,15 +114,18 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
         <label for="y0">Från år<input type="number" id="y0" min="1999" step="1"></label>
         <label for="y1">Till år<input type="number" id="y1" min="1999" step="1"></label>
       </div>
-      <label for="crit">Kriterium för kritiskt år
-        <select id="crit">
-          <option value="mi">Fuktindex (slagregn + uttorkning)</option>
-          <option value="dr">Slagregn mot fasad</option>
-          <option value="cold">Kallt år (låg årsmedeltemperatur)</option>
+      <label for="purpose">Typ av referensår
+        <select id="purpose">
+          <option value="fukt">Fukt (t.ex. WUFI)</option>
+          <option value="varme">Värme (kall vinter, stort uppvärmningsbehov)</option>
+          <option value="kyla">Kyla (varm sommar, stort kylbehov)</option>
         </select>
       </label>
+      <label for="crit">Kriterium för kritiskt år
+        <select id="crit"></select>
+      </label>
       <div class="row">
-        <label for="orient">Fasadorientering
+        <label for="orient" id="orient-wrap">Fasadorientering
           <select id="orient">
             <option value="auto">Mest utsatt (auto)</option>
             <option value="0">N</option><option value="45">NO</option><option value="90">O</option><option value="135">SO</option>
@@ -133,10 +137,11 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
             <option value="0.1">10 % (1 år av 10)</option>
             <option value="0.05">5 % (1 år av 20)</option>
             <option value="0">Värsta året</option>
+            <option value="0.5">50 % (medianår)</option>
           </select>
         </label>
       </div>
-      <p class="hint">EN 15026 anger ett fuktreferensår som överskrids med 10 % sannolikhet. Bara år med minst 85 % datatäckning rangordnas.</p>
+      <p class="hint" id="purpose-hint"></p>
     </section>
 
     <section class="panel" aria-labelledby="h-export">
@@ -149,7 +154,7 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
       </label>
       <label class="check" for="noleap"><input type="checkbox" id="noleap" checked> Ta bort 29 februari (alltid 8760 timmar)</label>
       <label class="check" for="meta"><input type="checkbox" id="meta" checked> Metadatarader överst (#)</label>
-      <button class="btn" id="run" type="button">Beräkna fuktreferensår</button>
+      <button class="btn" id="run" type="button">Beräkna referensår</button>
     </section>
   </div>
 
@@ -163,7 +168,7 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
     <section class="panel" id="results" aria-labelledby="h-res">
       <div class="headrow"><h2 id="h-res">Resultat</h2><span id="res-pill"></span></div>
       <div id="res-body">
-        <div class="empty"><strong>Inget beräknat än.</strong><br>Välj plats och period och tryck på <em>Beräkna fuktreferensår</em>. Appen hämtar timdata för hela perioden (oftast 20–60 MB), rangordnar åren och bygger en timfil för det kritiska året.</div>
+        <div class="empty"><strong>Inget beräknat än.</strong><br>Välj plats och period och tryck på <em>Beräkna referensår</em>. Appen hämtar timdata för hela perioden (oftast 20–60 MB), rangordnar åren och bygger en timfil för det kritiska året.</div>
       </div>
       <ul id="log" aria-live="polite"></ul>
     </section>
@@ -176,6 +181,9 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
           <li><b>Slagregn</b> beräknas timme för timme enligt SS-EN ISO 15927-3: I = 2/9 · v · r<sup>8/9</sup> · cos(D − θ), där v är vindhastighet, r nederbörd (mm/h), D vindriktning och θ fasadens normalriktning. Bara timmar med vind mot fasaden räknas.</li>
           <li><b>Uttorkningspotential</b> är årssumman av (1 − RF) · p<sub>sat</sub>(T), alltså mättnadsunderskottet.</li>
           <li><b>Fuktindex</b> (Cornick m.fl., NRC): båda storheterna normeras mot periodens högsta värde, och MI = √((1 − UI)² + SI²). Högt MI betyder mycket slagregn och liten uttorkning.</li>
+          <li><b>Värme</b>: <i>graddagar</i> är årssumman av (17 °C − dygnsmedeltemperatur) för dygn under 17 °C (förenklat, utan SMHI:s säsongsgränser). <i>Kallaste 3-dygnsmedel</i> är årets lägsta medeltemperatur under tre dygn i följd, samma tanke som bakom DVUT. Kalenderåret används, så en kall vinter kan delas mellan två år.</li>
+          <li><b>Kyla</b>: <i>kylgradtimmar</i> är årssumman av (T − 20 °C) för timmar över 20 °C. <i>Varmaste 3-dygnsmedel</i> fångar värmeböljor och <i>sommarmedel</i> är medeltemperaturen juni–augusti. Solstrålningen ingår inte i rangordningen, men finns med i klimatfilen.</li>
+          <li><b>Medianår</b> (50 %) ger ett år nära mitten av fördelningen för valt kriterium. Det är inte ett sammansatt typiskt år enligt SS-EN ISO 15927-4, men kan användas som jämförelse mot det kritiska året.</li>
           <li><b>Nivå</b>: vid 10 % och N år väljs det år som har rang ≈ 0,1·N räknat från det mest ogynnsamma. Klicka på en annan stapel för att exportera ett annat år.</li>
           <li><b>Strålning</b>: global, diffus och direkt normalstrålning från SMHI:s STRÅNG-modell (finns från 1999). Diffusstrålning finns i STRÅNG först från 2017. För tidigare år beräknas den som global − DNI · sin(solhöjd).</li>
           <li><b>Motstrålning</b> beräknas med Brutsaert för klar himmel och molnkorrektion enligt Crawford &amp; Duchon: ε = N + (1 − N)·1,24·(e/T)<sup>1/7</sup>, L = ε·σ·T⁴.</li>
@@ -199,6 +207,7 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
       <details>
         <summary>Ändringslogg</summary>
         <ul>
+          <li><b>2.0 – 2026-11-23</b>: Nytt namn, Kritiska klimatår (tidigare Fuktår). Referensår kan nu tas fram för fukt, värme eller kyla, med egna kriterier för varje typ. Ny nivå: 50 % (medianår).</li>
           <li><b>1.3 – 2026-11-22</b>: Länk till Ortsklimat med vald plats.</li>
           <li><b>1.2 – 2026-11-22</b>: Export direkt till WUFI (.wac) och till energisimulering (EnergyPlus .epw), utöver CSV.</li>
           <li><b>1.1 – 2026-11-20</b>: Plats kan förifyllas via länk (<code>?lat=…&amp;lon=…&amp;ort=…</code>), används av Ortsklimat. Versionsnummer, ändringslogg och referensruta.</li>
@@ -213,7 +222,8 @@ details p,details li{color:var(--muted);font-size:.88rem;max-width:75ch}
 <script>
 "use strict";
 // Uppdatera vid varje ändring, tillsammans med ändringsloggen i avsnittet Version
-const APP_VERSION = "1.3";
+const APP_VERSION = "2.0";
+const APP_NAME = "Kritiska klimatår";
 const APP_URL = "https://fgranne.github.io/Klimatfiler/";
 const ORTSKLIMAT_URL = "https://fgranne.github.io/Ortsklimat/";   // tar emot ?lat=…&lon=…&ort=…
 const APP_AUTHOR = "";   // Fyll i upphovsperson, t.ex. "Efternamn, F.", så kommer den först i referensen
@@ -232,6 +242,35 @@ const GROUPS = {
   CLOUD: { label: "Molnmängd",        params: [16] },
   PRES:  { label: "Lufttryck",        params: [9] },
 };
+// Kriterier per typ av referensår.
+// need = täckningskrav, sev = hur ogynnsamt (högre = värre), dec = decimaler, zero = y-axeln börjar på 0
+const CRITS = {
+  mi:    { label: "fuktindex",              opt: "Fuktindex (slagregn + uttorkning)",       unit: "fuktindex MI (–)",                  need: ["cT", "cDI", "cDR"], dec: 2, zero: true,  val: y => y.mi,     sev: y => y.mi },
+  dr:    { label: "slagregn",               opt: "Slagregn mot fasad",                      unit: "slagregn mot fasad (l/m²·år)",      need: ["cDR"],              dec: 0, zero: true,  val: y => y.dr,     sev: y => y.dr },
+  cold:  { label: "kallt år",               opt: "Kallt år (låg årsmedeltemperatur)",      unit: "årsmedeltemperatur (°C)",           need: ["cT"],               dec: 1, zero: false, val: y => y.meanT,  sev: y => -y.meanT },
+  hdd:   { label: "graddagar",              opt: "Graddagar för uppvärmning (bas 17 °C)",  unit: "graddagar (°C·dygn)",               need: ["cT"],               dec: 0, zero: true,  val: y => y.hdd,    sev: y => y.hdd },
+  cold3: { label: "kallaste 3-dygnsmedel",  opt: "Kallaste 3-dygnsmedeltemperatur",        unit: "lägsta 3-dygnsmedeltemperatur (°C)", need: ["cT"],              dec: 1, zero: false, val: y => y.min3,   sev: y => -y.min3 },
+  cdh:   { label: "kylgradtimmar",          opt: "Kylgradtimmar (över 20 °C)",             unit: "kylgradtimmar (°C·h)",              need: ["cT"],               dec: 0, zero: true,  val: y => y.cdh,    sev: y => y.cdh },
+  warm3: { label: "varmaste 3-dygnsmedel",  opt: "Varmaste 3-dygnsmedeltemperatur",        unit: "högsta 3-dygnsmedeltemperatur (°C)", need: ["cT"],              dec: 1, zero: false, val: y => y.max3,   sev: y => y.max3 },
+  warm:  { label: "varm sommar",            opt: "Varm sommar (medeltemperatur jun–aug)",  unit: "sommarmedeltemperatur (°C)",        need: ["cT"],               dec: 1, zero: false, val: y => y.meanS,  sev: y => y.meanS },
+};
+const PURPOSES = {
+  fukt:  { name: "fukt",  crits: ["mi", "dr", "cold"],
+    hint: "EN 15026 anger ett fuktreferensår som överskrids med 10 % sannolikhet. Bara år med minst 85 % datatäckning rangordnas." },
+  varme: { name: "värme", crits: ["hdd", "cold3", "cold"],
+    hint: "Med 10 % väljs ett år som bara vart tionde år är kallare enligt kriteriet. Medianåret ger ett mer normalt år. Bara år med minst 85 % datatäckning rangordnas." },
+  kyla:  { name: "kyla",  crits: ["cdh", "warm3", "warm"],
+    hint: "Med 10 % väljs ett år som bara vart tionde år är varmare enligt kriteriet. Medianåret ger ett mer normalt år. Bara år med minst 85 % datatäckning rangordnas." },
+};
+function setPurpose() {
+  const p = PURPOSES[$("purpose").value];
+  $("crit").innerHTML = p.crits.map(c => `<option value="${c}">${CRITS[c].opt}</option>`).join("");
+  $("purpose-hint").textContent = p.hint;
+  $("run").textContent = "Beräkna referensår för " + p.name;
+  updateOrientVisibility();
+}
+function updateOrientVisibility() { $("orient-wrap").hidden = !["mi", "dr"].includes($("crit").value); }
+
 const ORIENT = [["N",0],["NO",45],["O",90],["SO",135],["S",180],["SV",225],["V",270],["NV",315]];
 
 const state = {
@@ -467,8 +506,33 @@ async function run() {
         }
       }
       const cT = nT / len, cDI = nDI / len, cR = nR / len, cDR = nDR / len;
+      // värme och kyla: dygnsmedel (minst 20 timmar), graddagar, 3-dygnsmedel, kylgradtimmar, sommarmedel
+      const nDays = len / 24, dm = new Float64Array(nDays);
+      let hdd = 0, nD = 0, cdh = 0, sS = 0, nS = 0, minT = Infinity, maxT = -Infinity;
+      for (let d = 0; d < nDays; d++) {
+        let s = 0, c = 0;
+        for (let i = i0 + 24 * d; i < i0 + 24 * d + 24; i++) {
+          const t = T[i]; if (t !== t) continue;
+          s += t; c++; cdh += Math.max(0, t - 20);
+          if (t < minT) minT = t; if (t > maxT) maxT = t;
+        }
+        dm[d] = c >= 20 ? s / c : NaN;
+        if (dm[d] === dm[d]) {
+          nD++; hdd += Math.max(0, 17 - dm[d]);
+          const mo = new Date(Date.UTC(y, 0, 1 + d)).getUTCMonth();
+          if (mo >= 5 && mo <= 7) { sS += dm[d]; nS++; }
+        }
+      }
+      let min3 = Infinity, max3 = -Infinity;
+      for (let d = 2; d < nDays; d++) {
+        const m = (dm[d] + dm[d - 1] + dm[d - 2]) / 3;
+        if (m === m) { if (m < min3) min3 = m; if (m > max3) max3 = m; }
+      }
       years.push({
         y, cT, cDI, cDR, cR, meanT: nT ? sT / nT : NaN, meanRH: nRH ? sRH / nRH : NaN,
+        hdd: nD ? hdd * nDays / nD : NaN, cdh: cT ? cdh / cT : NaN, meanS: nS >= 60 ? sS / nS : NaN,
+        min3: isFinite(min3) ? min3 : NaN, max3: isFinite(max3) ? max3 : NaN,
+        minT: isFinite(minT) ? minT : NaN, maxT: isFinite(maxT) ? maxT : NaN,
         rain: cR ? sR / cR : NaN, DI: cDI ? sDI / cDI : NaN, DR: Array.from(dr, x => cDR ? x / cDR : NaN),
       });
     }
@@ -483,27 +547,29 @@ async function run() {
 function rank() {
   const res = state.result; if (!res) return;
   const crit = $("crit").value, level = +$("level").value, MIN = 0.85;
-  const need = { mi: ["cT", "cDI", "cDR"], dr: ["cDR"], cold: ["cT"] }[crit];
-  const ok = res.years.filter(y => need.every(k => y[k] >= MIN));
+  const C = CRITS[crit];
+  const cov = res.years.filter(y => C.need.every(k => y[k] >= MIN));
   // orientering
   let oi;
   if ($("orient").value === "auto") {
-    const tot = ORIENT.map((_, o) => ok.reduce((s, y) => s + (y.DR[o] || 0), 0));
+    const tot = ORIENT.map((_, o) => cov.reduce((s, y) => s + (y.DR[o] || 0), 0));
     oi = tot.indexOf(Math.max(...tot));
   } else oi = ORIENT.findIndex(o => String(o[1]) === $("orient").value);
-  const maxDR = Math.max(...ok.map(y => y.DR[oi])), maxDI = Math.max(...ok.map(y => y.DI));
+  const maxDR = Math.max(...cov.map(y => y.DR[oi])), maxDI = Math.max(...cov.map(y => y.DI));
   for (const y of res.years) {
-    y.ok = ok.includes(y);
     y.dr = y.DR[oi];
     y.mi = Math.sqrt((1 - y.DI / maxDI) ** 2 + (y.dr / maxDR) ** 2);
-    y.metric = crit === "mi" ? y.mi : crit === "dr" ? y.dr : y.meanT;
-    y.sev = crit === "cold" ? -y.meanT : y.metric;
+    y.metric = C.val(y);
+    y.sev = C.sev(y);
   }
+  // år som saknar värde för kriteriet (t.ex. sommarmedel vid stora luckor) rangordnas inte
+  const ok = cov.filter(y => Number.isFinite(y.metric));
+  for (const y of res.years) y.ok = ok.includes(y);
   const sorted = ok.slice().sort((a, b) => b.sev - a.sev);
   sorted.forEach((y, i) => y.rank = i + 1);
   res.years.filter(y => !y.ok).forEach(y => y.rank = null);
   const k = Math.max(1, Math.round(level * sorted.length));
-  res.crit = crit; res.oi = oi; res.critYear = sorted[k - 1]?.y ?? null; res.nOk = sorted.length; res.k = k;
+  res.crit = crit; res.purpose = $("purpose").value; res.oi = oi; res.critYear = sorted[k - 1]?.y ?? null; res.nOk = sorted.length; res.k = k;
   if (!sorted.length) { log("Inget år har tillräcklig datatäckning. Byt station eller period.", "err"); renderResults(); return; }
   buildYear(res.critYear);
 }
@@ -651,8 +717,8 @@ function makeCSV() {
   const stName = g => (state.cand[g] || []).find(c => c.id === state.sel[g]);
   const L = [];
   if ($("meta").checked) {
-    L.push(`# Fuktår – klimatfil skapad ${new Date().toISOString().slice(0, 10)} från SMHI öppna data (CC BY 4.0)`);
-    L.push(`# Plats: ${state.lat.toFixed(4)} N, ${state.lon.toFixed(4)} E; år ${b.y}; kriterium ${critLabel()} ${orientLabel()}; rang ${yObj?.rank ?? "–"} av ${res.nOk} (period ${res.y0}–${res.y1})`);
+    L.push(`# ${APP_NAME} ${APP_VERSION} – klimatfil (referensår för ${PURPOSES[res.purpose].name}) skapad ${new Date().toISOString().slice(0, 10)} från SMHI öppna data (CC BY 4.0)`);
+    L.push(`# Plats: ${state.lat.toFixed(4)} N, ${state.lon.toFixed(4)} E; år ${b.y}; kriterium ${critText()}; rang ${yObj?.rank ?? "–"} av ${res.nOk} (period ${res.y0}–${res.y1})`);
     for (const g of Object.keys(GROUPS)) { const c = stName(g); if (c) L.push(`# ${GROUPS[g].label}: ${c.name} (${c.id}), ${c.d.toFixed(0)} km, ${c.h} m ö.h.`); }
     L.push(`# Strålning: SMHI STRÅNG för platsen. Motstrålning beräknad (Brutsaert + Crawford & Duchon). Lufttryck omräknat till ${b.hgt.toFixed(0)} m ö.h.`);
     L.push(`# Tid: svensk normaltid UTC+1. Ifyllt = parametrar som fyllts i (reservstation eller interpolation).`);
@@ -675,7 +741,7 @@ function makeCSV() {
   state.csv = (sv ? "﻿" : "") + L.join("\r\n") + "\r\n";
   state.rows = rows;
   const place = (state.cand.T?.find(c => c.id === state.sel.T)?.name || `${state.lat.toFixed(2)}_${state.lon.toFixed(2)}`).replace(/[^\wåäöÅÄÖ-]+/g, "_");
-  state.fileName = `fuktar_${place}_${b.y}_${res.crit}.csv`;
+  state.fileName = `klimatar_${res.purpose}_${place}_${b.y}_${res.crit}.csv`;
 }
 /* ---------- export till WUFI (.wac) och energisimulering (.epw) ---------- */
 // Båda formaten får alltid 8760 timmar (29 februari tas bort), eftersom WUFI inte hanterar skottdagar.
@@ -712,8 +778,8 @@ function makeWAC() {
   const L = [
     "WUFI®_WAC_02",
     "10\tLine Offset to 'Number of Data Columns'",
-    txt(`Fuktår: ${placeLabel()} ${b.y}`),
-    txt(`Kriterium ${critLabel()} ${orientLabel()}, rang ${yObj?.rank ?? "–"} av ${res.nOk} (${res.y0}–${res.y1}). SMHI öppna data och STRÅNG (CC BY 4.0), Fuktår ${APP_VERSION}`),
+    txt(`${APP_NAME}: ${placeLabel()} ${b.y}, referensår för ${PURPOSES[res.purpose].name}`),
+    txt(`Kriterium ${critText()}, rang ${yObj?.rank ?? "–"} av ${res.nOk} (${res.y0}–${res.y1}). SMHI öppna data och STRÅNG (CC BY 4.0), ${APP_NAME} ${APP_VERSION}`),
     `${state.lon.toFixed(4)}\tLongitude [°]; East is positive`,
     `${state.lat.toFixed(4)}\tLatitude [°]; North is positive`,
     `${Math.round(b.hgt)}\tHeightAMSL [m]`,
@@ -742,7 +808,7 @@ function makeEPW() {
     "TYPICAL/EXTREME PERIODS,0",
     "GROUND TEMPERATURES,0",
     "HOLIDAYS/DAYLIGHT SAVINGS,No,0,0,0",
-    `COMMENTS 1,${asciiText(`Fuktar ${APP_VERSION}: year ${b.y} criterion ${critLabel()} ${orientLabel()} period ${res.y0}-${res.y1}`)}`,
+    `COMMENTS 1,${asciiText(`Kritiska klimatar ${APP_VERSION}: ${{ fukt: "moisture", varme: "heating", kyla: "cooling" }[res.purpose]} reference year ${b.y} criterion ${critText()} period ${res.y0}-${res.y1}`)}`,
     `COMMENTS 2,${asciiText("Source SMHI open data and STRANG (CC BY 4.0). Feb 29 removed. Sky IR calculated (Brutsaert + Crawford and Duchon). Gaps filled from backup station or interpolation.")}`,
     `DATA PERIODS,1,1,Data,${days[new Date(t0).getUTCDay()]},1/1,12/31`,
   ];
@@ -762,10 +828,16 @@ function makeEPW() {
 }
 
 ["sep", "noleap", "meta"].forEach(id => $(id).addEventListener("change", () => { if (state.built) { makeCSV(); renderResults(); } }));
-["crit", "orient", "level"].forEach(id => $(id).addEventListener("change", () => { if (state.result) rank(); }));
+["crit", "orient", "level"].forEach(id => $(id).addEventListener("change", () => { updateOrientVisibility(); if (state.result) rank(); }));
+$("purpose").addEventListener("change", () => { setPurpose(); if (state.result) rank(); });
+setPurpose();
 
-function critLabel() { return { mi: "fuktindex", dr: "slagregn", cold: "kallt år" }[state.result?.crit] || ""; }
-function orientLabel() { const o = ORIENT[state.result?.oi]; return o ? `(fasad mot ${o[0]})` : ""; }
+function critText() { return [critLabel(), orientLabel()].filter(Boolean).join(" "); }
+function critLabel() { return CRITS[state.result?.crit]?.label || ""; }
+function orientLabel() {
+  const o = ORIENT[state.result?.oi];
+  return o && ["mi", "dr"].includes(state.result.crit) ? `(fasad mot ${o[0]})` : "";
+}
 
 /* ---------- presentation ---------- */
 function niceTicks(lo, hi, n = 4) {
@@ -779,11 +851,11 @@ function chartSVG() {
   const res = state.result, ys = res.years, W = 720, Hh = 250, ml = 46, mr = 10, mt = 14, mb = 30;
   const vals = ys.map(y => y.metric).filter(v => v === v);
   let lo = Math.min(...vals), hi = Math.max(...vals);
-  if (res.crit !== "cold") lo = 0; else { const pad = (hi - lo) * 0.15 || 0.5; lo -= pad; hi += pad; }
+  if (CRITS[res.crit].zero) lo = 0; else { const pad = (hi - lo) * 0.15 || 0.5; lo -= pad; hi += pad; }
   if (hi === lo) hi = lo + 1;
   const ticks = niceTicks(lo, hi); lo = Math.min(lo, ticks[0]); hi = Math.max(hi, ticks[ticks.length - 1]);
   const bw = (W - ml - mr) / ys.length, yS = v => mt + (Hh - mt - mb) * (1 - (v - lo) / (hi - lo));
-  const dec = res.crit === "mi" ? 2 : res.crit === "dr" ? 0 : 1;
+  const dec = CRITS[res.crit].dec;
   let s = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Rangordning av år">`;
   for (const t of ticks) s += `<line x1="${ml}" x2="${W - mr}" y1="${yS(t)}" y2="${yS(t)}" stroke="var(--line)"/><text x="${ml - 6}" y="${yS(t) + 4}" text-anchor="end">${t.toFixed(dec)}</text>`;
   const every = ys.length > 24 ? 2 : 1;
@@ -803,24 +875,36 @@ function chartSVG() {
 function renderResults() {
   const res = state.result, body = $("res-body");
   if (!res) return;
-  const unit = { mi: "fuktindex MI (–)", dr: "slagregn mot fasad (l/m²·år)", cold: "årsmedeltemperatur (°C)" }[res.crit];
-  const okYears = res.years.filter(y => y.ok), mean = k => okYears.reduce((s, y) => s + y[k], 0) / okYears.length;
+  const unit = CRITS[res.crit].unit;
+  const okYears = res.years.filter(y => y.ok && Number.isFinite(y.meanT)), mean = k => okYears.reduce((s, y) => s + y[k], 0) / okYears.length;
   const sel = res.years.find(y => y.y === state.selYear);
-  $("res-pill").innerHTML = res.critYear ? `<span class="pill">Kritiskt år: ${res.critYear}</span>` : "";
+  const levelText = $("level").selectedOptions[0].text.split(" (")[0];
+  $("res-pill").innerHTML = res.critYear ? `<span class="pill">Referensår för ${PURPOSES[res.purpose].name}: ${res.critYear}</span>` : "";
   let h = `<div class="headrow"><h3>${state.selYear ?? "–"} ${state.selYear === res.critYear ? `<span class="pill">rang ${res.k} av ${res.nOk}</span>` : sel?.rank ? `<span class="pill sel">rang ${sel.rank} av ${res.nOk}</span>` : ""}</h3>
-    <span class="hint">${critLabel()} ${orientLabel()} · ${res.y0}–${res.y1}</span></div>
+    <span class="hint">${critText()} · ${res.y0}–${res.y1}</span></div>
     <div class="chart">${chartSVG()}</div>
-    <div class="legend"><span><i style="background:var(--crit)"></i>Kritiskt år (${$("level").selectedOptions[0].text.split(" (")[0]})</span><span><i style="background:var(--accent)"></i>Valt år</span><span><i style="border:1px dashed var(--muted)"></i>För låg datatäckning</span><span>Y-axel: ${unit}. Klicka på en stapel för att välja ett annat år.</span></div>`;
+    <div class="legend"><span><i style="background:var(--crit)"></i>Referensår (${levelText})</span><span><i style="background:var(--accent)"></i>Valt år</span><span><i style="border:1px dashed var(--muted)"></i>För låg datatäckning</span><span>Y-axel: ${unit}. Klicka på en stapel för att välja ett annat år.</span></div>`;
   if (sel) {
     const o = ORIENT[res.oi][0];
     const tile = (k, v, d) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${d}</div></div>`;
     const diff = (a, b, dd) => (a - b >= 0 ? "+" : "−") + Math.abs(a - b).toFixed(dd);
-    h += `<div class="tiles">
-      ${tile("Årsmedeltemperatur", sel.meanT.toFixed(1) + " °C", `periodmedel ${mean("meanT").toFixed(1)} (${diff(sel.meanT, mean("meanT"), 1)})`)}
-      ${tile("Nederbörd", sel.rain.toFixed(0) + " mm", `periodmedel ${mean("rain").toFixed(0)}`)}
-      ${tile("Slagregn mot " + o, sel.dr.toFixed(0) + " l/m²", `periodmedel ${mean("dr").toFixed(0)}`)}
-      ${tile("Medel-RF", sel.meanRH.toFixed(0) + " %", `fuktindex ${sel.mi.toFixed(2)}`)}
-    </div>`;
+    const fx = (v, d) => Number.isFinite(v) ? v.toFixed(d).replace("-", "−") : "–";
+    const tMean = tile("Årsmedeltemperatur", fx(sel.meanT, 1) + " °C", `periodmedel ${fx(mean("meanT"), 1)} (${diff(sel.meanT, mean("meanT"), 1)})`);
+    const tiles = {
+      fukt: [tMean,
+        tile("Nederbörd", fx(sel.rain, 0) + " mm", `periodmedel ${fx(mean("rain"), 0)}`),
+        tile("Slagregn mot " + o, fx(sel.dr, 0) + " l/m²", `periodmedel ${fx(mean("dr"), 0)}`),
+        tile("Medel-RF", fx(sel.meanRH, 0) + " %", `fuktindex ${fx(sel.mi, 2)}`)],
+      varme: [tMean,
+        tile("Graddagar (bas 17 °C)", fx(sel.hdd, 0), `periodmedel ${fx(mean("hdd"), 0)}`),
+        tile("Kallaste 3-dygnsmedel", fx(sel.min3, 1) + " °C", `periodmedel ${fx(mean("min3"), 1)}`),
+        tile("Lägsta timtemperatur", fx(sel.minT, 1) + " °C", `periodmedel ${fx(mean("minT"), 1)}`)],
+      kyla: [tMean,
+        tile("Kylgradtimmar (> 20 °C)", fx(sel.cdh, 0), `periodmedel ${fx(mean("cdh"), 0)}`),
+        tile("Varmaste 3-dygnsmedel", fx(sel.max3, 1) + " °C", `periodmedel ${fx(mean("max3"), 1)}`),
+        tile("Högsta timtemperatur", fx(sel.maxT, 1) + " °C", `sommarmedel ${fx(sel.meanS, 1)} °C`)],
+    }[res.purpose];
+    h += `<div class="tiles">${tiles.join("")}</div>`;
   }
   const b = state.built;
   if (b && b.y === state.selYear && state.csv) {
@@ -859,7 +943,7 @@ $("version").textContent = APP_VERSION;
 {
   const today = new Date().toISOString().slice(0, 10);
   $("cite").textContent = (APP_AUTHOR ? APP_AUTHOR + " (" + today.slice(0, 4) + "). " : "") +
-    "Fuktår: kritiska klimatår för fuktberäkningar (version " + APP_VERSION + ") [Webbverktyg]. " + APP_URL +
+    APP_NAME + ": referensår för fukt-, värme- och kylberäkningar (version " + APP_VERSION + ") [Webbverktyg]. " + APP_URL +
     ". Hämtad " + today + ". Underlagsdata: SMHI, öppna data och STRÅNG (CC BY 4.0).";
   $("cite-copy").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText($("cite").textContent); $("cite-note").textContent = "Kopierad."; }
